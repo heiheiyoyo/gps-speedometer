@@ -16,12 +16,11 @@
 
   <style>
     :root {
-      --paper: #f4efe4;
-      --ink: #0d0d0d;
-      --ink-mid: #2a2a2a;
-      --ink-light: #5a5a5a;
-      --ink-ghost: #9a9a9a;
-      --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      --paper: #ffffff;
+      --ink: #000000;
+      --ink-mid: #000000;
+      --ink-light: #444444;
+      --ink-ghost: #888888;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -39,7 +38,6 @@
       justify-content: flex-start;
       font-family: 'Noto Sans SC', sans-serif;
       background-color: var(--paper);
-      background-image: var(--grain);
       color: var(--ink);
       min-height: 100dvh;
       padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
@@ -328,7 +326,6 @@
       position: fixed;
       inset: 0;
       background: var(--paper);
-      background-image: var(--grain);
       display: flex;
       flex-direction: column;
       align-items: center;
