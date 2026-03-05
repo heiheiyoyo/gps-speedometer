@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gps-speedometer-v4';
+const CACHE_NAME = 'gps-speedometer-v5';
 const ASSETS = [
   './index.html',
   './manifest.json'

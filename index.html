@@ -515,15 +515,23 @@
     let useMetric = true;
     let watchId = null;
 
-    let currentSpeed = 0;   // m/s
+    let currentSpeed = 0;   // m/s (smoothed)
     let maxSpeed = 0;        // m/s
     let totalDist = 0;       // meters
     let tripStart = null;
-    let tripElapsed = 0;     // ms when not paused
-    let pauseTime = null;
+    let tripElapsed = 0;     // ms accumulated (paused excluded)
+    let movingTime = 0;      // ms actually moving (for avg speed)
+    let lastMovingTs = null; // timestamp when we last considered moving
 
     let lastPos = null;
     let lastUpdate = null;
+
+    // ── Smoothing & thresholds ──
+    const SMOOTH_ALPHA = 0.3;        // EMA factor: lower=smoother
+    let smoothedSpeed = 0;           // m/s internal EMA
+    const SPEED_ZERO_THRESHOLD = 0.5; // m/s (~1.8 km/h) below = zero
+    const MAX_ACCURACY = 25;          // meters: ignore bad fixes
+    const MAX_SANE_SPEED = 100;       // m/s sanity cap (~360 km/h)
 
     // ── Elements ──
     const overlay     = document.getElementById('overlay');
@@ -587,7 +595,7 @@
       return (m / 1609.344).toFixed(2);
     }
 
-    // ── Elapsed time ──
+    // ── Elapsed time (wall clock, pauses excluded) ──
     function getElapsed() {
       if (!tripStart) return 0;
       if (paused) return tripElapsed;
@@ -626,11 +634,10 @@
       distVal.textContent = distDisplay(totalDist);
       distUnitEl.textContent = useMetric ? 'km' : 'mi';
 
-      // Avg speed (only when moving)
-      const elapsed = getElapsed();
+      // Avg speed: use only moving time (excludes stops)
       let avg = 0;
-      if (elapsed > 3000 && totalDist > 0) {
-        avg = toDisplay(totalDist / (elapsed / 1000));
+      if (movingTime > 3000 && totalDist > 0) {
+        avg = toDisplay(totalDist / (movingTime / 1000));
       }
       avgVal.textContent = Math.round(avg);
 
@@ -641,54 +648,82 @@
       avgUnitEl.textContent = unitSuffix;
       maxUnitEl.textContent = unitSuffix;
 
-      timeVal.textContent = formatTime(elapsed);
+      timeVal.textContent = formatTime(getElapsed());
     }
 
     // ── GPS Callback ──
     function onPosition(pos) {
       if (paused) return;
 
-      const { latitude, longitude, speed, heading } = pos.coords;
+      const { latitude, longitude, speed, heading, accuracy } = pos.coords;
       const now = Date.now();
 
       // GPS signal acquired
       gpsDot.classList.remove('searching');
       gpsDot.classList.add('active');
-      gpsLabel.textContent = '已定位';
+      gpsLabel.textContent = accuracy <= MAX_ACCURACY
+        ? `±${Math.round(accuracy)}m`
+        : `弱信号 ±${Math.round(accuracy)}m`;
 
       if (!tripStart) {
         tripStart = now;
         lastUpdate = now;
       }
 
-      // Use GPS speed if available, else compute from position delta
+      // ── 1. Accuracy gate: ignore bad fixes ──
+      if (accuracy > MAX_ACCURACY) {
+        lastUpdate = now;
+        return; // skip this fix entirely
+      }
+
+      // ── 2. Raw speed: prefer GPS hardware speed, fallback to position delta ──
+      let rawSpeed = 0;
       if (speed !== null && speed >= 0) {
-        currentSpeed = speed;
+        rawSpeed = speed;
       } else if (lastPos) {
         const dist = haversine(lastPos.lat, lastPos.lon, latitude, longitude);
         const dt = (now - lastPos.time) / 1000;
-        if (dt > 0) currentSpeed = dist / dt;
+        if (dt > 0) rawSpeed = dist / dt;
       }
 
-      // Distance from position delta
-      if (lastPos) {
+      // ── 3. Sanity cap ──
+      rawSpeed = Math.min(rawSpeed, MAX_SANE_SPEED);
+
+      // ── 4. EMA smoothing ──
+      smoothedSpeed = SMOOTH_ALPHA * rawSpeed + (1 - SMOOTH_ALPHA) * smoothedSpeed;
+
+      // ── 5. Zero-clamp: below threshold = stop ──
+      const isMoving = smoothedSpeed >= SPEED_ZERO_THRESHOLD;
+      currentSpeed = isMoving ? smoothedSpeed : 0;
+
+      // ── 6. Distance: only accumulate when moving & fix is sane ──
+      if (lastPos && isMoving) {
         const d = haversine(lastPos.lat, lastPos.lon, latitude, longitude);
-        // Sanity check: filter out GPS jumps
         const dt = (now - lastPos.time) / 1000;
-        if (dt > 0 && d / dt < 100) {  // < 360 km/h sanity
+        if (dt > 0 && d / dt < MAX_SANE_SPEED) {
           totalDist += d;
         }
       }
 
-      // Max speed
+      // ── 7. Moving time (for avg speed, excludes stops) ──
+      if (isMoving) {
+        if (lastMovingTs) movingTime += now - lastMovingTs;
+        lastMovingTs = now;
+      } else {
+        lastMovingTs = null;
+      }
+
+      // ── 8. Max speed ──
       if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
 
-      // Direction
-      if (heading !== null && heading >= 0) {
-        dirEl.textContent = bearingLabel(heading);
-      } else if (lastPos) {
-        const b = bearing(lastPos.lat, lastPos.lon, latitude, longitude);
-        dirEl.textContent = bearingLabel(b);
+      // ── 9. Direction (only update when actually moving) ──
+      if (isMoving) {
+        if (heading !== null && heading >= 0) {
+          dirEl.textContent = bearingLabel(heading);
+        } else if (lastPos) {
+          const b = bearing(lastPos.lat, lastPos.lon, latitude, longitude);
+          dirEl.textContent = bearingLabel(b);
+        }
       }
 
       lastPos = { lat: latitude, lon: longitude, time: now };
@@ -756,10 +791,13 @@
     // ── Reset ──
     resetBtn.addEventListener('click', () => {
       currentSpeed = 0;
+      smoothedSpeed = 0;
       maxSpeed = 0;
       totalDist = 0;
       tripStart = null;
       tripElapsed = 0;
+      movingTime = 0;
+      lastMovingTs = null;
       lastPos = null;
       lastUpdate = null;
       dirEl.textContent = '---°';
