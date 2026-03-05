@@ -1,0 +1,793 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0a0a0a" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+  <meta name="apple-mobile-web-app-title" content="速度计" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <title>GPS 速度计</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Share+Tech+Mono&family=Noto+Sans+SC:wght@300;400;700&display=swap" rel="stylesheet" />
+
+  <style>
+    :root {
+      --paper: #f4efe4;
+      --ink: #0d0d0d;
+      --ink-mid: #2a2a2a;
+      --ink-light: #5a5a5a;
+      --ink-ghost: #9a9a9a;
+      --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      height: 100%;
+      overflow: hidden;
+      background: var(--ink);
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      font-family: 'Noto Sans SC', sans-serif;
+      background-color: var(--paper);
+      background-image: var(--grain);
+      color: var(--ink);
+      min-height: 100dvh;
+      padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0) env(safe-area-inset-left, 0);
+      position: relative;
+    }
+
+    /* Dithered edge pattern top */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      height: 6px;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--ink) 0px, var(--ink) 2px,
+        transparent 2px, transparent 4px
+      );
+      z-index: 100;
+    }
+    body::after {
+      content: '';
+      position: fixed;
+      bottom: 0; left: 0; right: 0;
+      height: 6px;
+      background: repeating-linear-gradient(
+        90deg,
+        var(--ink) 0px, var(--ink) 2px,
+        transparent 2px, transparent 4px
+      );
+      z-index: 100;
+    }
+
+    /* ───── HEADER ───── */
+    .header {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px 10px;
+      border-bottom: 2px solid var(--ink);
+    }
+    .header-title {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--ink-mid);
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .gps-indicator {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--ink-light);
+    }
+    .gps-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--ink-ghost);
+      border: 1.5px solid var(--ink-light);
+      transition: background 0.3s, border-color 0.3s;
+    }
+    .gps-dot.active { background: var(--ink); border-color: var(--ink); }
+    .gps-dot.searching {
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.2} }
+
+    /* ───── SPEED ZONE ───── */
+    .speed-zone {
+      flex: 0 0 auto;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 20px 0;
+      position: relative;
+    }
+
+    .speed-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(120px, 32vw, 220px);
+      line-height: 0.9;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      text-align: center;
+      transition: color 0.15s;
+      position: relative;
+      /* Subtle text shadow for e-ink depth */
+      text-shadow: 2px 2px 0px rgba(0,0,0,0.08);
+      user-select: none;
+    }
+
+    .speed-value.high { color: #000; }
+
+    /* Ghost "shadow" digits for E-ink afterimage feel */
+    .speed-unit-row {
+      display: flex;
+      align-items: baseline;
+      justify-content: center;
+      gap: 12px;
+      margin-top: -4px;
+      margin-bottom: 6px;
+    }
+    .speed-unit {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 16px;
+      letter-spacing: 0.3em;
+      color: var(--ink-light);
+      text-transform: uppercase;
+    }
+    .speed-direction {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.15em;
+      color: var(--ink-ghost);
+      min-width: 40px;
+      text-align: center;
+    }
+
+    /* Analog arc indicator */
+    .arc-wrap {
+      width: 100%;
+      max-width: 340px;
+      padding: 0 10px;
+    }
+    .arc-track {
+      width: 100%;
+      height: 8px;
+      background: var(--paper);
+      border: 1.5px solid var(--ink);
+      position: relative;
+      overflow: hidden;
+    }
+    .arc-track::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: repeating-linear-gradient(
+        90deg,
+        transparent 0px, transparent 3px,
+        var(--ink) 3px, var(--ink) 4px
+      );
+      opacity: 0.15;
+    }
+    .arc-fill {
+      position: absolute;
+      top: 0; left: 0; bottom: 0;
+      background: var(--ink);
+      width: 0%;
+      transition: width 0.4s cubic-bezier(0.4,0,0.2,1);
+    }
+    .arc-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: 4px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--ink-ghost);
+      letter-spacing: 0.05em;
+    }
+
+    /* ───── DIVIDER ───── */
+    .divider {
+      width: 100%;
+      margin: 10px 0 0;
+      display: flex;
+      align-items: center;
+      gap: 0;
+    }
+    .divider-line {
+      flex: 1;
+      height: 2px;
+      background: var(--ink);
+    }
+    .divider-label {
+      padding: 0 12px;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.3em;
+      color: var(--ink-mid);
+      text-transform: uppercase;
+      border: 1.5px solid var(--ink);
+      height: 20px;
+      display: flex;
+      align-items: center;
+    }
+
+    /* ───── STATS GRID ───── */
+    .stats-grid {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border-top: none;
+      flex: 1;
+    }
+    .stat-cell {
+      padding: 14px 20px 16px;
+      border-right: 1.5px solid var(--ink);
+      border-bottom: 1.5px solid var(--ink);
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      position: relative;
+    }
+    .stat-cell:nth-child(even) { border-right: none; }
+    .stat-cell:nth-last-child(-n+2) { border-bottom: none; }
+
+    /* Corner marks */
+    .stat-cell::before {
+      content: '';
+      position: absolute;
+      top: 6px; left: 6px;
+      width: 4px; height: 4px;
+      border-top: 1.5px solid var(--ink-ghost);
+      border-left: 1.5px solid var(--ink-ghost);
+    }
+
+    .stat-label {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--ink-light);
+      text-transform: uppercase;
+    }
+    .stat-value {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: clamp(36px, 9vw, 52px);
+      line-height: 1;
+      color: var(--ink);
+      letter-spacing: 0.02em;
+    }
+    .stat-unit {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      color: var(--ink-ghost);
+      letter-spacing: 0.15em;
+    }
+
+    /* ───── CONTROLS BAR ───── */
+    .controls {
+      width: 100%;
+      border-top: 2px solid var(--ink);
+      display: flex;
+      align-items: stretch;
+      height: 52px;
+    }
+    .btn {
+      flex: 1;
+      background: none;
+      border: none;
+      border-right: 1.5px solid var(--ink);
+      cursor: pointer;
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      color: var(--ink-mid);
+      text-transform: uppercase;
+      transition: background 0.1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .btn:last-child { border-right: none; }
+    .btn:active { background: var(--ink); color: var(--paper); }
+    .btn.active { background: var(--ink); color: var(--paper); }
+
+    .btn-icon {
+      font-size: 14px;
+      line-height: 1;
+    }
+
+    /* ───── PERMISSION OVERLAY ───── */
+    .overlay {
+      position: fixed;
+      inset: 0;
+      background: var(--paper);
+      background-image: var(--grain);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 24px;
+      z-index: 200;
+      padding: 40px;
+    }
+    .overlay.hidden { display: none; }
+
+    .overlay-icon {
+      font-size: 48px;
+      line-height: 1;
+    }
+    .overlay-title {
+      font-family: 'Bebas Neue', sans-serif;
+      font-size: 36px;
+      letter-spacing: 0.05em;
+      text-align: center;
+    }
+    .overlay-desc {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--ink-light);
+      text-align: center;
+      line-height: 1.9;
+      max-width: 280px;
+    }
+    .overlay-btn {
+      border: 2px solid var(--ink);
+      background: var(--ink);
+      color: var(--paper);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      padding: 14px 32px;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+      transition: background 0.15s, color 0.15s;
+    }
+    .overlay-btn:active { background: var(--paper); color: var(--ink); }
+
+    .overlay-error {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: var(--ink-light);
+      text-align: center;
+      border: 1px solid var(--ink-ghost);
+      padding: 10px 16px;
+      max-width: 280px;
+      line-height: 1.7;
+      display: none;
+    }
+    .overlay-error.show { display: block; }
+
+    /* ───── CLOCK ───── */
+    .clock {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 10px;
+      letter-spacing: 0.15em;
+      color: var(--ink-ghost);
+    }
+
+    /* Unit toggle */
+    .unit-toggle {
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 9px;
+      letter-spacing: 0.2em;
+      color: var(--ink-ghost);
+      cursor: pointer;
+      border: 1px solid var(--ink-ghost);
+      padding: 2px 6px;
+      user-select: none;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Permission Overlay -->
+  <div class="overlay" id="overlay">
+    <div class="overlay-icon">◎</div>
+    <div class="overlay-title">GPS 速度计</div>
+    <div class="overlay-desc">
+      需要访问您的位置信息<br/>
+      以获取实时 GPS 速度数据<br/>
+      <br/>
+      建议在户外使用以获得<br/>
+      最佳 GPS 信号
+    </div>
+    <button class="overlay-btn" id="startBtn">开始定位</button>
+    <div class="overlay-error" id="overlayError"></div>
+  </div>
+
+  <!-- Header -->
+  <div class="header">
+    <div class="header-title">GPS · 速度计</div>
+    <div class="status-row">
+      <div class="clock" id="clock">--:--:--</div>
+      <div class="gps-indicator">
+        <div class="gps-dot searching" id="gpsDot"></div>
+        <span id="gpsLabel">搜索中</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Speed Zone -->
+  <div class="speed-zone">
+    <div class="speed-value" id="speedValue">0</div>
+    <div class="speed-unit-row">
+      <div class="speed-unit" id="speedUnit">km/h</div>
+      <div class="speed-direction" id="direction">---°</div>
+    </div>
+    <div class="arc-wrap">
+      <div class="arc-track">
+        <div class="arc-fill" id="arcFill"></div>
+      </div>
+      <div class="arc-labels">
+        <span>0</span><span>30</span><span>60</span><span>90</span><span>120</span><span>160+</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Divider -->
+  <div class="divider">
+    <div class="divider-line"></div>
+    <div class="divider-label">行程数据</div>
+    <div class="divider-line"></div>
+  </div>
+
+  <!-- Stats Grid -->
+  <div class="stats-grid">
+    <div class="stat-cell">
+      <div class="stat-label">里程</div>
+      <div class="stat-value" id="distValue">0.00</div>
+      <div class="stat-unit" id="distUnit">km</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">均速</div>
+      <div class="stat-value" id="avgValue">0</div>
+      <div class="stat-unit" id="avgUnit">km/h</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">最大速度</div>
+      <div class="stat-value" id="maxValue">0</div>
+      <div class="stat-unit" id="maxUnit">km/h</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-label">行程时间</div>
+      <div class="stat-value" id="timeValue">00:00</div>
+      <div class="stat-unit">h:m</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn" id="unitBtn">
+      <span class="btn-icon">⇄</span>
+      <span id="unitLabel">mph</span>
+    </button>
+    <button class="btn" id="pauseBtn">
+      <span class="btn-icon">▐▐</span>
+      <span>暂停</span>
+    </button>
+    <button class="btn" id="resetBtn">
+      <span class="btn-icon">↺</span>
+      <span>重置</span>
+    </button>
+  </div>
+
+  <script>
+    // ── State ──
+    let watching = false;
+    let paused = false;
+    let useMetric = true;
+    let watchId = null;
+
+    let currentSpeed = 0;   // m/s
+    let maxSpeed = 0;        // m/s
+    let totalDist = 0;       // meters
+    let tripStart = null;
+    let tripElapsed = 0;     // ms when not paused
+    let pauseTime = null;
+
+    let lastPos = null;
+    let lastUpdate = null;
+
+    // ── Elements ──
+    const overlay     = document.getElementById('overlay');
+    const startBtn    = document.getElementById('startBtn');
+    const overlayError= document.getElementById('overlayError');
+    const gpsDot      = document.getElementById('gpsDot');
+    const gpsLabel    = document.getElementById('gpsLabel');
+    const clock       = document.getElementById('clock');
+    const speedVal    = document.getElementById('speedValue');
+    const speedUnitEl = document.getElementById('speedUnit');
+    const dirEl       = document.getElementById('direction');
+    const arcFill     = document.getElementById('arcFill');
+    const distVal     = document.getElementById('distValue');
+    const distUnitEl  = document.getElementById('distUnit');
+    const avgVal      = document.getElementById('avgValue');
+    const avgUnitEl   = document.getElementById('avgUnit');
+    const maxVal      = document.getElementById('maxValue');
+    const maxUnitEl   = document.getElementById('maxUnit');
+    const timeVal     = document.getElementById('timeValue');
+    const unitBtn     = document.getElementById('unitBtn');
+    const unitLabel   = document.getElementById('unitLabel');
+    const pauseBtn    = document.getElementById('pauseBtn');
+    const resetBtn    = document.getElementById('resetBtn');
+
+    // ── Clock ──
+    function updateClock() {
+      const now = new Date();
+      const hh = String(now.getHours()).padStart(2,'0');
+      const mm = String(now.getMinutes()).padStart(2,'0');
+      const ss = String(now.getSeconds()).padStart(2,'0');
+      clock.textContent = `${hh}:${mm}:${ss}`;
+    }
+    setInterval(updateClock, 1000);
+    updateClock();
+
+    // ── Haversine ──
+    function haversine(lat1, lon1, lat2, lon2) {
+      const R = 6371000;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const a = Math.sin(dLat/2)**2 +
+                Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    }
+
+    // ── Bearing ──
+    function bearing(lat1, lon1, lat2, lon2) {
+      const dLon = (lon2 - lon1) * Math.PI / 180;
+      const y = Math.sin(dLon) * Math.cos(lat2*Math.PI/180);
+      const x = Math.cos(lat1*Math.PI/180)*Math.sin(lat2*Math.PI/180) -
+                Math.sin(lat1*Math.PI/180)*Math.cos(lat2*Math.PI/180)*Math.cos(dLon);
+      return (Math.atan2(y,x)*180/Math.PI + 360) % 360;
+    }
+
+    // ── Conversions ──
+    function toDisplay(mps) {
+      return useMetric ? mps * 3.6 : mps * 2.23694;
+    }
+    function distDisplay(m) {
+      if (useMetric) return (m / 1000).toFixed(2);
+      return (m / 1609.344).toFixed(2);
+    }
+
+    // ── Elapsed time ──
+    function getElapsed() {
+      if (!tripStart) return 0;
+      if (paused) return tripElapsed;
+      return tripElapsed + (Date.now() - lastUpdate);
+    }
+
+    function formatTime(ms) {
+      const totalSec = Math.floor(ms / 1000);
+      const h = Math.floor(totalSec / 3600);
+      const m = Math.floor((totalSec % 3600) / 60);
+      const s = totalSec % 60;
+      if (h > 0) return `${h}:${String(m).padStart(2,'0')}`;
+      return `${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;
+    }
+
+    // ── Direction label ──
+    function bearingLabel(deg) {
+      if (deg === null || deg === undefined) return '---°';
+      const dirs = ['N','NE','E','SE','S','SW','W','NW'];
+      return dirs[Math.round(deg/45) % 8] + ' ' + Math.round(deg) + '°';
+    }
+
+    // ── Render UI ──
+    function render() {
+      const spd = toDisplay(currentSpeed);
+      const maxSpd = toDisplay(maxSpeed);
+
+      speedVal.textContent = Math.round(spd);
+
+      // Arc: max ref = 160 km/h or 100 mph
+      const maxRef = useMetric ? 160 : 100;
+      const pct = Math.min(spd / maxRef * 100, 100);
+      arcFill.style.width = pct + '%';
+
+      // Stats
+      distVal.textContent = distDisplay(totalDist);
+      distUnitEl.textContent = useMetric ? 'km' : 'mi';
+
+      // Avg speed (only when moving)
+      const elapsed = getElapsed();
+      let avg = 0;
+      if (elapsed > 3000 && totalDist > 0) {
+        avg = toDisplay(totalDist / (elapsed / 1000));
+      }
+      avgVal.textContent = Math.round(avg);
+
+      maxVal.textContent = Math.round(maxSpd);
+
+      const unitSuffix = useMetric ? 'km/h' : 'mph';
+      speedUnitEl.textContent = unitSuffix;
+      avgUnitEl.textContent = unitSuffix;
+      maxUnitEl.textContent = unitSuffix;
+
+      timeVal.textContent = formatTime(elapsed);
+    }
+
+    // ── GPS Callback ──
+    function onPosition(pos) {
+      if (paused) return;
+
+      const { latitude, longitude, speed, heading } = pos.coords;
+      const now = Date.now();
+
+      // GPS signal acquired
+      gpsDot.classList.remove('searching');
+      gpsDot.classList.add('active');
+      gpsLabel.textContent = '已定位';
+
+      if (!tripStart) {
+        tripStart = now;
+        lastUpdate = now;
+      }
+
+      // Use GPS speed if available, else compute from position delta
+      if (speed !== null && speed >= 0) {
+        currentSpeed = speed;
+      } else if (lastPos) {
+        const dist = haversine(lastPos.lat, lastPos.lon, latitude, longitude);
+        const dt = (now - lastPos.time) / 1000;
+        if (dt > 0) currentSpeed = dist / dt;
+      }
+
+      // Distance from position delta
+      if (lastPos) {
+        const d = haversine(lastPos.lat, lastPos.lon, latitude, longitude);
+        // Sanity check: filter out GPS jumps
+        const dt = (now - lastPos.time) / 1000;
+        if (dt > 0 && d / dt < 100) {  // < 360 km/h sanity
+          totalDist += d;
+        }
+      }
+
+      // Max speed
+      if (currentSpeed > maxSpeed) maxSpeed = currentSpeed;
+
+      // Direction
+      if (heading !== null && heading >= 0) {
+        dirEl.textContent = bearingLabel(heading);
+      } else if (lastPos) {
+        const b = bearing(lastPos.lat, lastPos.lon, latitude, longitude);
+        dirEl.textContent = bearingLabel(b);
+      }
+
+      lastPos = { lat: latitude, lon: longitude, time: now };
+      lastUpdate = now;
+      render();
+    }
+
+    function onError(err) {
+      gpsDot.classList.remove('active');
+      gpsDot.classList.add('searching');
+      const msgs = {
+        1: '位置访问被拒绝，请在系统设置中允许',
+        2: 'GPS 信号不可用',
+        3: 'GPS 请求超时，请移至空旷处重试'
+      };
+      overlayError.textContent = msgs[err.code] || '未知错误：' + err.message;
+      overlayError.classList.add('show');
+      overlay.classList.remove('hidden');
+      gpsLabel.textContent = '错误';
+    }
+
+    // ── Start GPS ──
+    startBtn.addEventListener('click', () => {
+      if (!navigator.geolocation) {
+        overlayError.textContent = '您的浏览器不支持 Geolocation API';
+        overlayError.classList.add('show');
+        return;
+      }
+      overlay.classList.add('hidden');
+      gpsDot.classList.add('searching');
+      gpsLabel.textContent = '搜索中';
+
+      watchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 15000
+      });
+      watching = true;
+    });
+
+    // ── Unit Toggle ──
+    unitBtn.addEventListener('click', () => {
+      useMetric = !useMetric;
+      unitLabel.textContent = useMetric ? 'mph' : 'km/h';
+      render();
+    });
+
+    // ── Pause / Resume ──
+    pauseBtn.addEventListener('click', () => {
+      if (!watching) return;
+      paused = !paused;
+      if (paused) {
+        tripElapsed += Date.now() - lastUpdate;
+        pauseBtn.innerHTML = '<span class="btn-icon">▶</span><span>继续</span>';
+        pauseBtn.classList.add('active');
+        currentSpeed = 0;
+      } else {
+        lastUpdate = Date.now();
+        pauseBtn.innerHTML = '<span class="btn-icon">▐▐</span><span>暂停</span>';
+        pauseBtn.classList.remove('active');
+      }
+      render();
+    });
+
+    // ── Reset ──
+    resetBtn.addEventListener('click', () => {
+      currentSpeed = 0;
+      maxSpeed = 0;
+      totalDist = 0;
+      tripStart = null;
+      tripElapsed = 0;
+      lastPos = null;
+      lastUpdate = null;
+      dirEl.textContent = '---°';
+      arcFill.style.width = '0%';
+      if (paused) {
+        paused = false;
+        pauseBtn.innerHTML = '<span class="btn-icon">▐▐</span><span>暂停</span>';
+        pauseBtn.classList.remove('active');
+      }
+      render();
+    });
+
+    // ── Tick for time ──
+    setInterval(() => {
+      if (watching && !paused && tripStart) render();
+    }, 1000);
+
+    // ── Service Worker ──
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    }
+
+    // ── Keep screen awake ──
+    let wakeLock = null;
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch {}
+    }
+    document.addEventListener('visibilitychange', async () => {
+      if (document.visibilityState === 'visible') await requestWakeLock();
+    });
+    requestWakeLock();
+  </script>
+</body>
+</html>
