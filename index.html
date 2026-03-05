@@ -526,9 +526,7 @@
     let lastPos = null;
     let lastUpdate = null;
 
-    // ── Smoothing & thresholds ──
-    const SMOOTH_ALPHA = 0.3;        // EMA factor: lower=smoother
-    let smoothedSpeed = 0;           // m/s internal EMA
+    // ── Thresholds ──
     const SPEED_ZERO_THRESHOLD = 0.5; // m/s (~1.8 km/h) below = zero
     const MAX_ACCURACY = 25;          // meters: ignore bad fixes
     const MAX_SANE_SPEED = 100;       // m/s sanity cap (~360 km/h)
@@ -689,12 +687,9 @@
       // ── 3. Sanity cap ──
       rawSpeed = Math.min(rawSpeed, MAX_SANE_SPEED);
 
-      // ── 4. EMA smoothing ──
-      smoothedSpeed = SMOOTH_ALPHA * rawSpeed + (1 - SMOOTH_ALPHA) * smoothedSpeed;
-
-      // ── 5. Zero-clamp: below threshold = stop ──
-      const isMoving = smoothedSpeed >= SPEED_ZERO_THRESHOLD;
-      currentSpeed = isMoving ? smoothedSpeed : 0;
+      // ── 4. Zero-clamp: below threshold = stop ──
+      const isMoving = rawSpeed >= SPEED_ZERO_THRESHOLD;
+      currentSpeed = isMoving ? rawSpeed : 0;
 
       // ── 6. Distance: only accumulate when moving & fix is sane ──
       if (lastPos && isMoving) {
@@ -791,7 +786,6 @@
     // ── Reset ──
     resetBtn.addEventListener('click', () => {
       currentSpeed = 0;
-      smoothedSpeed = 0;
       maxSpeed = 0;
       totalDist = 0;
       tripStart = null;
