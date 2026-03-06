@@ -527,9 +527,10 @@
     let lastUpdate = null;
 
     // ── Thresholds ──
-    const SPEED_ZERO_THRESHOLD = 0.5; // m/s (~1.8 km/h) below = zero
     const MAX_ACCURACY = 25;          // meters: ignore bad fixes
     const MAX_SANE_SPEED = 100;       // m/s sanity cap (~360 km/h)
+    const SMOOTH_ALPHA = 0.6;         // EMA: fast response, kills single-frame spikes
+    let smoothedSpeed = 0;            // m/s
 
     // ── Elements ──
     const overlay     = document.getElementById('overlay');
@@ -687,9 +688,15 @@
       // ── 3. Sanity cap ──
       rawSpeed = Math.min(rawSpeed, MAX_SANE_SPEED);
 
-      // ── 4. Zero-clamp: below threshold = stop ──
-      const isMoving = rawSpeed >= SPEED_ZERO_THRESHOLD;
-      currentSpeed = isMoving ? rawSpeed : 0;
+      // ── 4. Light EMA smoothing (α=0.6, fast but kills single-frame spikes) ──
+      smoothedSpeed = SMOOTH_ALPHA * rawSpeed + (1 - SMOOTH_ALPHA) * smoothedSpeed;
+
+      // ── 5. Adaptive zero-clamp: threshold scales with GPS accuracy ──
+      //    Poor signal → higher threshold → less phantom speed
+      //    Good signal → lower threshold → more sensitive
+      const dynamicThreshold = Math.max(0.5, (accuracy || 20) * 0.1); // m/s
+      const isMoving = smoothedSpeed >= dynamicThreshold;
+      currentSpeed = isMoving ? smoothedSpeed : 0;
 
       // ── 6. Distance: only accumulate when moving & fix is sane ──
       if (lastPos && isMoving) {
@@ -786,6 +793,7 @@
     // ── Reset ──
     resetBtn.addEventListener('click', () => {
       currentSpeed = 0;
+      smoothedSpeed = 0;
       maxSpeed = 0;
       totalDist = 0;
       tripStart = null;
